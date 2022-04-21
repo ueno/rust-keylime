@@ -7,6 +7,7 @@ use std::{
     fs::File,
     io::{prelude::*, Error, SeekFrom},
     path::Path,
+    sync::{Arc, Mutex},
 };
 
 /// IMAMeasurementList models the IMA measurement lists's last two known
@@ -57,14 +58,16 @@ impl ImaMeasurementList {
 /// was read and the current number of entries in the file.
 pub(crate) fn read_measurement_list(
     ima_ml: &mut ImaMeasurementList,
-    filename: &Path,
+    ima_file: &Option<Arc<Mutex<File>>>,
     nth_entry: u64,
 ) -> IMAError {
-    if !Path::new(filename).exists() {
+    let mut file = if let Some(file_arc) = ima_file {
+        file_arc.lock().unwrap() //#[allow_ci]
+    } else {
         let _ = ima_ml.reset();
-        warn!("IMA measurement list not available: {}", filename.display());
+        warn!("IMA measurement list not available");
         return Ok((None, None, None));
-    }
+    };
 
     let mut nth_entry = nth_entry;
 
@@ -73,7 +76,6 @@ pub(crate) fn read_measurement_list(
 
     let mut ml = None;
     let mut filedata = String::new();
-    let mut file = File::open(filename)?;
     let _ = file.seek(SeekFrom::Start(filesize))?;
     let _ = file.read_to_string(&mut filedata)?;
     let mut offset: usize = 0;
@@ -94,7 +96,11 @@ pub(crate) fn read_measurement_list(
     let _ = ima_ml.update(num_entries, filesize + offset as u64);
 
     match ml {
-        None => read_measurement_list(ima_ml, filename, 0),
+        None => {
+            // Explicitly drop to unlock mutex
+            drop(file);
+            read_measurement_list(ima_ml, ima_file, 0)
+        }
         Some(slice) => Ok((
             Some(String::from(slice)),
             Some(nth_entry),
@@ -116,16 +122,19 @@ mod tests {
         tf.write_all(filedata.as_bytes());
         tf.flush();
 
+        let file_arc =
+            Some(Arc::new(Mutex::new(File::open(tf.path()).unwrap()))); //#[allow_ci]
+
         // Request the 2nd entry, which is available
         let (ml, nth_entry, num_entries) =
-            read_measurement_list(&mut ima_ml, tf.path(), 2).unwrap(); //#[allow_ci]
+            read_measurement_list(&mut ima_ml, &file_arc, 2).unwrap(); //#[allow_ci]
         assert_eq!(num_entries, Some(3));
         assert_eq!(nth_entry, Some(2));
         assert_eq!(ml.unwrap().find("2-entry").unwrap(), 0); //#[allow_ci]
 
         // Request the 3rd entry, which is not available yet, thus we get an empty list
         let (ml, nth_entry, num_entries) =
-            read_measurement_list(&mut ima_ml, tf.path(), 3).unwrap(); //#[allow_ci]
+            read_measurement_list(&mut ima_ml, &file_arc, 3).unwrap(); //#[allow_ci]
         assert_eq!(num_entries, Some(3));
         assert_eq!(nth_entry, Some(3));
         assert_eq!(ml.unwrap().len(), 0); //#[allow_ci]
@@ -133,7 +142,7 @@ mod tests {
         // Request the 4th entry, which is beyond the next entry; since this is wrong,
         // we expect the entire list now.
         let (ml, nth_entry, num_entries) =
-            read_measurement_list(&mut ima_ml, tf.path(), 4).unwrap(); //#[allow_ci]
+            read_measurement_list(&mut ima_ml, &file_arc, 4).unwrap(); //#[allow_ci]
         assert_eq!(num_entries, Some(3));
         assert_eq!(nth_entry, Some(0));
         assert_eq!(ml.unwrap().find("0-entry").unwrap(), 0); //#[allow_ci]
