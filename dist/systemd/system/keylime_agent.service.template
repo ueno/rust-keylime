@@ -11,7 +11,7 @@ After=tpm2-abrmd.service
 #ConditionPathExistsGlob=/dev/tpmrm[0-9]*
 
 [Service]
-ExecStart=/usr/bin/keylime_agent
+ExecStart=KEYLIMEDIR/keylime_agent
 KillSignal=SIGINT
 TimeoutSec=60s
 Restart=on-failure
