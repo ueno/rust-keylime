@@ -26,7 +26,7 @@ impl ImaMeasurementList {
         }
     }
 
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.entries = HashSet::new();
     }
 
@@ -58,17 +58,9 @@ impl ImaMeasurementList {
 /// was read and the current number of entries in the file.
 pub(crate) fn read_measurement_list(
     ima_ml: &mut ImaMeasurementList,
-    ima_file: &Option<Arc<Mutex<File>>>,
+    ima_file: &mut File,
     nth_entry: u64,
 ) -> IMAError {
-    let mut file = if let Some(file_arc) = ima_file {
-        file_arc.lock().unwrap() //#[allow_ci]
-    } else {
-        let _ = ima_ml.reset();
-        warn!("IMA measurement list not available");
-        return Ok((None, None, None));
-    };
-
     let mut nth_entry = nth_entry;
 
     // Try to find the closest entry to the nth_entry
@@ -76,8 +68,8 @@ pub(crate) fn read_measurement_list(
 
     let mut ml = None;
     let mut filedata = String::new();
-    let _ = file.seek(SeekFrom::Start(filesize))?;
-    let _ = file.read_to_string(&mut filedata)?;
+    let _ = ima_file.seek(SeekFrom::Start(filesize))?;
+    let _ = ima_file.read_to_string(&mut filedata)?;
     let mut offset: usize = 0;
 
     loop {
@@ -96,11 +88,7 @@ pub(crate) fn read_measurement_list(
     let _ = ima_ml.update(num_entries, filesize + offset as u64);
 
     match ml {
-        None => {
-            // Explicitly drop to unlock mutex
-            drop(file);
-            read_measurement_list(ima_ml, ima_file, 0)
-        }
+        None => read_measurement_list(ima_ml, ima_file, 0),
         Some(slice) => Ok((
             Some(String::from(slice)),
             Some(nth_entry),

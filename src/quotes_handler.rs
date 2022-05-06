@@ -239,21 +239,30 @@ pub async fn integrity(
     }
 
     // Generate the measurement list
+    let mut ima_ml = data.ima_ml.lock().unwrap(); //#[allow_ci]
     let (ima_measurement_list, ima_measurement_list_entry, num_entries) =
-        match read_measurement_list(
-            &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
-            &data.ima_ml_file,
-            nth_entry,
-        ) {
-            Ok(result) => result,
-            Err(e) => {
-                debug!("Unable to read measurement list: {:?}", e);
-                return HttpResponse::InternalServerError().json(
-                    JsonWrapper::error(
-                        500,
-                        "Unable to retrieve quote".to_string(),
-                    ),
-                );
+        if data.ima_ml_file.is_none() {
+            let _ = ima_ml.reset();
+            warn!("IMA measurement list not available");
+            (None, None, None)
+        } else {
+            let mut ima_ml_file =
+                data.ima_ml_file.as_ref().unwrap().lock().unwrap(); //#[allow_ci]
+            match read_measurement_list(
+                &mut ima_ml,
+                &mut ima_ml_file,
+                nth_entry,
+            ) {
+                Ok(result) => result,
+                Err(e) => {
+                    debug!("Unable to read measurement list: {:?}", e);
+                    return HttpResponse::InternalServerError().json(
+                        JsonWrapper::error(
+                            500,
+                            "Unable to retrieve quote".to_string(),
+                        ),
+                    );
+                }
             }
         };
 
@@ -351,31 +360,28 @@ mod tests {
                 .public_eq(&quotedata.pub_key)
         );
 
-        if let Some(ima_arc) = &quotedata.ima_ml_file {
-            let mut ima_ml_file = ima_arc.lock().unwrap(); //#[allow_ci]
-            ima_ml_file.rewind().unwrap(); //#[allow_ci]
-            let mut ima_ml = String::new();
-            match ima_ml_file.read_to_string(&mut ima_ml) {
-                Ok(_) => {
-                    assert_eq!(
-                        result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
-                        ima_ml
-                    );
-                    assert!(result.results.quote.starts_with('r'));
+        let ima_ml_file = quotedata.ima_ml_file.expect("IMA file was None");
+        let mut ima_ml_file = ima_ml_file.lock().unwrap(); //#[allow_ci]
+        ima_ml_file.rewind().unwrap(); //#[allow_ci]
+        let mut ima_ml = String::new();
+        match ima_ml_file.read_to_string(&mut ima_ml) {
+            Ok(_) => {
+                assert_eq!(
+                    result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
+                    ima_ml
+                );
+                assert!(result.results.quote.starts_with('r'));
 
-                    let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
-                    tpm::testing::check_quote(
-                        &mut context,
-                        quotedata.ak_handle,
-                        &result.results.quote,
-                        b"1234567890ABCDEFHIJ",
-                    )
-                    .expect("unable to verify quote");
-                }
-                Err(e) => panic!("Could not read IMA file: {}", e), //#[allow_ci]
+                let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
+                tpm::testing::check_quote(
+                    &mut context,
+                    quotedata.ak_handle,
+                    &result.results.quote,
+                    b"1234567890ABCDEFHIJ",
+                )
+                .expect("unable to verify quote");
             }
-        } else {
-            panic!("IMA file was None"); //#[allow_ci]
+            Err(e) => panic!("Could not read IMA file: {}", e), //#[allow_ci]
         }
     }
 
@@ -405,22 +411,19 @@ mod tests {
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
 
-        if let Some(ima_arc) = &quotedata.ima_ml_file {
-            let mut ima_ml_file = ima_arc.lock().unwrap(); //#[allow_ci]
-            ima_ml_file.rewind().unwrap(); //#[allow_ci]
-            let mut ima_ml = String::new();
-            match ima_ml_file.read_to_string(&mut ima_ml) {
-                Ok(_) => {
-                    assert_eq!(
-                        result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
-                        ima_ml
-                    );
-                    assert!(result.results.quote.starts_with('r'));
-                }
-                Err(e) => panic!("Could not read IMA file: {}", e), //#[allow_ci]
+        let ima_ml_file = quotedata.ima_ml_file.expect("IMA file was None");
+        let mut ima_ml_file = ima_arc.lock().unwrap(); //#[allow_ci]
+        ima_ml_file.rewind().unwrap(); //#[allow_ci]
+        let mut ima_ml = String::new();
+        match ima_ml_file.read_to_string(&mut ima_ml) {
+            Ok(_) => {
+                assert_eq!(
+                    result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
+                    ima_ml
+                );
+                assert!(result.results.quote.starts_with('r'));
             }
-        } else {
-            panic!("IMA file was None"); //#[allow_ci]
+            Err(e) => panic!("Could not read IMA file: {}", e), //#[allow_ci]
         }
 
         let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]

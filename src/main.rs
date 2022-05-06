@@ -105,7 +105,7 @@ pub struct QuoteData {
     allow_payload_revocation_actions: bool,
     secure_size: String,
     work_dir: PathBuf,
-    ima_ml_file: Option<Arc<Mutex<fs::File>>>,
+    ima_ml_file: Option<Mutex<fs::File>>,
     measuredboot_ml_file: Option<Arc<Mutex<fs::File>>>,
     ima_ml: Mutex<ImaMeasurementList>,
     secure_mount: PathBuf,
@@ -351,7 +351,7 @@ async fn main() -> Result<()> {
     let ima_ml_path = ima_ml_path_get();
     let ima_ml_file = if ima_ml_path.exists() {
         match fs::File::open(&ima_ml_path) {
-            Ok(file) => Some(Arc::new(Mutex::new(file))),
+            Ok(file) => Some(Mutex::new(file)),
             Err(e) => {
                 warn!(
                     "IMA measurement list not accessible: {}",
@@ -807,7 +807,7 @@ mod testing {
             let ima_ml_path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("test-data/ima/ascii_runtime_measurements");
             let ima_ml_file = match fs::File::open(ima_ml_path) {
-                Ok(file) => Some(Arc::new(Mutex::new(file))),
+                Ok(file) => Some(Mutex::new(file)),
                 Err(err) => None,
             };
 
